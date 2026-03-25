@@ -19,3 +19,14 @@ async def get_bool(key: str, default: bool = False) -> bool:
 
 async def set_bool(key: str, value: bool) -> None:
     await ft.SharedPreferences().set(key, "1" if bool(value) else "0")
+
+
+async def get_str(key: str, default: str = "") -> str:
+    raw = await ft.SharedPreferences().get(key)
+    if raw is None:
+        return default
+    return str(raw)
+
+
+async def set_str(key: str, value: str) -> None:
+    await ft.SharedPreferences().set(key, value)

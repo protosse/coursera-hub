@@ -1,9 +1,20 @@
 import flet as ft
 
-from views.home import HomeApp
+from views.home import HomeView
 
 
-async def main(page: ft.Page):
+@ft.component
+def App():
+    return ft.SafeArea(
+        expand=True,
+        content=ft.Container(
+            padding=ft.Padding.symmetric(horizontal=10),
+            content=HomeView(),
+        ),
+    )
+
+
+def main(page: ft.Page):
     page.title = "Coursera Downloader"
     page.window.resizable = False
     page.appbar = ft.AppBar(
@@ -11,16 +22,7 @@ async def main(page: ft.Page):
         title=page.title,
     )
     page.theme_mode = ft.ThemeMode.LIGHT
-    home = HomeApp()
-    page.add(
-        ft.SafeArea(
-            expand=True,
-            content=ft.Container(
-                padding=ft.Padding.symmetric(horizontal=10),
-                content=home,
-            ),
-        )
-    )
+    page.render(App)
 
 
 ft.run(main)
