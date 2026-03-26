@@ -22,3 +22,6 @@ class PreferencesKeys:
     lang2 = "lang2"
     browser = "browser"
     download_dir = "download_dir"
+    course_url = "course_url"
+    is_special = "is_special"
+    cauth_cookie = "cauth_cookie"
