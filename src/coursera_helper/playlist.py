@@ -1,5 +1,5 @@
-import glob
 import os
+import glob
 
 
 def create_m3u_playlist(section_dir):

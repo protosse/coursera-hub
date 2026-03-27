@@ -17,6 +17,7 @@ import sys
 import time
 
 import requests
+from six import iteritems
 
 #
 # Below are file downloaders, they are wrappers for external downloaders.
@@ -31,7 +32,7 @@ class Downloader(object):
 
     Usage::
 
-      >>> import downloaders
+      >>> from coursera_helper import downloaders
       >>> d = downloaders.SubclassFromDownloader()
       >>> d.download('http://example.com', 'save/to/this/file')
     """
@@ -86,8 +87,6 @@ class ExternalDownloader(Downloader):
         if not self.bin:
             raise RuntimeError("No bin specified")
 
-        # self._check_bin()
-
     def _prepare_cookies(self, command, url):
         """
         Extract cookies from the requests session and add them to the command
@@ -121,20 +120,6 @@ class ExternalDownloader(Downloader):
         Create command to execute in a subprocess.
         """
         raise NotImplementedError("Subclasses should implement this")
-
-    def _check_bin(self):
-        """
-        Make sure the downloader is installed
-        """
-        try:
-            ret = subprocess.run([self.bin, "--version"])
-        except FileNotFoundError:
-            raise RuntimeError(f"Downloader '{self.bin}' not found")
-
-        if ret.returncode != 0:
-            raise RuntimeError(
-                f"Downloader '{self.bin}' returned a non-zero exit status"
-            )
 
     def _start_download(self, url, filename, resume):
         command = self._create_command(url, filename)
@@ -327,6 +312,11 @@ class NativeDownloader(Downloader):
 
     def __init__(self, session):
         self.session = session
+        self._cancel_flag = False
+
+    def set_cancel_flag(self, flag):
+        """设置取消标志"""
+        self._cancel_flag = flag
 
     def _start_download(self, url, filename, resume=False):
         # resume has no meaning if the file doesn't exists!
@@ -345,6 +335,11 @@ class NativeDownloader(Downloader):
         attempts_count = 0
         error_msg = ""
         while attempts_count < max_attempts:
+            # 检查取消标志
+            if self._cancel_flag:
+                logging.info("Download cancelled by user")
+                return False
+
             r = self.session.get(url, stream=True, headers=headers)
 
             if r.status_code != 200:
@@ -391,6 +386,13 @@ class NativeDownloader(Downloader):
             progress.start()
             f = open(filename, "ab") if resume else open(filename, "wb")
             while True:
+                # 检查取消标志
+                if self._cancel_flag:
+                    logging.info("Download cancelled by user")
+                    f.close()
+                    r.close()
+                    return False
+
                 data = r.raw.read(chunk_sz, decode_content=True)
                 if not data:
                     progress.stop()
@@ -419,16 +421,12 @@ def get_downloader(session, class_name, args):
         "axel": AxelDownloader,
     }
 
-    for bin, class_ in external.items():
+    for bin, class_ in iteritems(external):
         if getattr(args, bin):
-            try:
-                ret = subprocess.run([bin, "--version"])
-                return class_(
-                    session,
-                    bin=getattr(args, bin),
-                    downloader_arguments=args.downloader_arguments,
-                )
-            except FileNotFoundError:
-                return NativeDownloader(session)
+            return class_(
+                session,
+                bin=getattr(args, bin),
+                downloader_arguments=args.downloader_arguments,
+            )
 
     return NativeDownloader(session)

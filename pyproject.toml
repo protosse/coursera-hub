@@ -1,33 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "coursera-hub"
-version = "0.1.0"
-description = ""
-readme = "README.md"
-requires-python = ">=3.10"
+version = "1.0.0"
+description = "A cross-platform desktop client for downloading Coursera courses"
 authors = [
-    { name = "Flet developer", email = "you@example.com" }
+    { name = "" },
 ]
 dependencies = [
-    "attrs>=26.1.0",
-    "beautifulsoup4>=4.14.3",
+    "flet>=0.22.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.2",
+    "lxml>=4.9.3",
     "browser-cookie3>=0.20.1",
+    "playwright>=1.48.0",
+    "attrs>=25.3.0",
     "configargparse>=1.7.5",
-    "flet>=0.82.2",
-    "requests>=2.32.5",
 ]
+requires-python = ">=3.8"
 
-[dependency-groups]
-dev = [
-    "flet-cli>=0.82.2",
-    "flet-desktop>=0.82.2",
-    "flet-web>=0.82.2",
-]
-
-[tool.flet]
-org = "com.mycompany"
-product = "coursera-hub"
-company = "Flet"
-copyright = "Copyright (C) 2023-2026 by Flet"
+[tool.setuptools.packages.find]
+where = ["."]
 
 [tool.flet.app]
 path = "src"

@@ -35,6 +35,11 @@ class CourseraExtractor(PlatformExtractor):
     def __init__(self, session):
         self._notebook_downloaded = False
         self._session = session
+        self._cancel_flag = False
+
+    def set_cancel_flag(self, flag):
+        """设置取消标志"""
+        self._cancel_flag = flag
 
     def list_courses(self):
         """
@@ -149,9 +154,19 @@ class CourseraExtractor(PlatformExtractor):
         all_items = ItemsV2.from_json(dom["linked"]["onDemandCourseMaterialItems.v2"])
 
         for module in all_modules:
+            # 检查取消标志
+            if self._cancel_flag:
+                logging.info("Parsing cancelled by user")
+                return True, []
+
             logging.info("Processing module  %s", module.slug)
             lessons = []
             for section in module.children(all_lessons):
+                # 检查取消标志
+                if self._cancel_flag:
+                    logging.info("Parsing cancelled by user")
+                    return True, []
+
                 logging.info("Processing section     %s", section.slug)
                 lectures = []
                 available_lectures = section.children(all_items)
@@ -165,6 +180,11 @@ class CourseraExtractor(PlatformExtractor):
                         available_lectures = [lecture]
 
                 for lecture in available_lectures:
+                    # 检查取消标志
+                    if self._cancel_flag:
+                        logging.info("Parsing cancelled by user")
+                        return True, []
+
                     typename = lecture.type_name
 
                     logging.info(
@@ -200,14 +220,6 @@ class CourseraExtractor(PlatformExtractor):
                     elif typename == "quiz":
                         if download_quizzes:
                             links = course.extract_links_from_quiz(lecture.id)
-
-                    elif typename == "staffGraded":
-                        logging.info(
-                            'Staff graded assignment skipped: "%s" in lecture "%s" (lecture id "%s")',
-                            lecture.slug,
-                            lecture.slug,
-                            lecture.id,
-                        )
 
                     elif typename == "exam":
                         if download_quizzes:

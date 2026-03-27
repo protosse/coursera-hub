@@ -1,6 +1,46 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# Authors and copyright:
+#     © 2012-2013, John Lehmann (first last at geemail dotcom or @jplehmann)
+#     © 2012-2020, Rogério Theodoro de Brito
+#     © 2013, Jonas De Taeye (first dt at fastmail fm)
+#
+# Contributions are welcome, but please add new unit tests to test your changes
+# and/or features.  Also, please try to make changes platform independent and
+# backward compatible.
+#
+# Legalese:
+#
+#  This program is free software: you can redistribute it and/or modify it
+#  under the terms of the GNU Lesser General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or (at your
+#  option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+"""
+Module for downloading lecture resources such as videos for Coursera classes.
+
+Given a class name, username and password, it scrapes the course listing
+page to get the section (week) and lecture names, and then downloads the
+related materials into appropriately named files and directories.
+
+Examples:
+  coursera-helper -u <user> -p <passwd> saas
+  coursera-helper -u <user> -p <passwd> -l listing.html -o saas --skip-download
+
+For further documentation and examples, visit the project's home at:
+  https://github.com/csyezheng/coursera
+"""
+
 
 import logging
 import os
@@ -11,22 +51,27 @@ import time
 # We may, perhaps, want to move these elsewhere.
 import bs4
 import requests
+import six
 from packaging.version import Version as V
+
+from coursera_helper import __version__
+from coursera_helper.cauth import cauth_by_cookie, cauth_by_login
 
 from .api import expand_specializations
 from .commandline import parse_args
-from .cookies import AuthenticationFailed, ClassNotFound, TLSAdapter, login
+from .cookies import AuthenticationFailed, ClassNotFound, TLSAdapter
 from .define import PATH_CACHE
 from .downloaders import get_downloader
 from .extractors import CourseraExtractor
 from .parallel import ConsecutiveDownloader, ParallelDownloader
-from .utils import is_debug_run, mkdir_p, slurp_json, spit_json
+from .utils import is_debug_run, mkdir_p, print_ssl_error_message, slurp_json, spit_json
 from .workflow import CourseraDownloader
 
 # URL containing information about outdated modules
-_SEE_URL = " See https://github.com/coursera-dl/coursera/issues/139"
+_SEE_URL = " See https://github.com/csyezheng/coursera/issues/139"
 
 assert V(requests.__version__) >= V("2.4"), "Upgrade requests!" + _SEE_URL
+assert V(six.__version__) >= V("1.5"), "Upgrade six!" + _SEE_URL
 assert V(bs4.__version__) >= V("4.1"), "Upgrade bs4!" + _SEE_URL
 
 
@@ -41,64 +86,26 @@ def get_session():
     return session
 
 
-def create_session(args):
-    session = get_session()
-    if args.cookies_cauth:
-        session.cookies.set("CAUTH", args.cookies_cauth)
-    elif args.browser:
-
-        def autocookie(browser):
-            import browser_cookie3
-
-            if browser == "chrome":
-                cj = browser_cookie3.chrome(domain_name="coursera.org")
-            elif browser == "chromium":
-                cj = browser_cookie3.chromium(domain_name="coursera.org")
-            elif browser == "opera":
-                cj = browser_cookie3.opera(domain_name="coursera.org")
-            elif browser == "opera_gx":
-                cj = browser_cookie3.opera_gx(domain_name="coursera.org")
-            elif browser == "brave":
-                cj = browser_cookie3.brave(domain_name="coursera.org")
-            elif browser == "edge":
-                cj = browser_cookie3.edge(domain_name="coursera.org")
-            elif browser == "vivaldi":
-                cj = browser_cookie3.vivaldi(domain_name="coursera.org")
-            elif browser == "firefox":
-                cj = browser_cookie3.firefox(domain_name="coursera.org")
-            elif browser == "librewolf":
-                cj = browser_cookie3.librewolf(domain_name="coursera.org")
-            elif browser == "safari":
-                cj = browser_cookie3.safari(domain_name="coursera.org")
-            else:
-                raise RuntimeError(f"Invalid browser {args.browser}")
-            for cookie in cj:
-                if cookie.name == "CAUTH":
-                    return cookie.value
-            else:
-                raise Exception("Can not find CAUTH in {args.browser}")
-
-        cauth_cookie = autocookie(args.browser)
-        logging.debug(f'Got CAUTH cookie from {args.browser}: "{cauth_cookie}"')
-        session.cookies.set("CAUTH", cauth_cookie)
-    else:
-        login(session, args.username, args.password)
-    return session
-
-
-def list_courses(args):
+def list_courses(session, args):
     """
     List enrolled courses.
+
+    @param session: session.
+    @type session: session
 
     @param args: Command-line arguments.
     @type args: namedtuple
     """
-    session = create_session(args)
     extractor = CourseraExtractor(session)
     courses = extractor.list_courses()
     logging.info("Found %d courses", len(courses))
     for course in courses:
         logging.info(course)
+
+
+_course_downloader_instance = None
+_file_downloader_instance = None
+_extractor_instance = None
 
 
 def download_on_demand_class(session, args, class_name):
@@ -111,9 +118,14 @@ def download_on_demand_class(session, args, class_name):
         whether the course appears to be completed.
     @rtype: (bool, bool)
     """
+    global _course_downloader_instance
+    global _file_downloader_instance
+    global _extractor_instance
 
     error_occurred = False
     extractor = CourseraExtractor(session)
+    # 保存extractor实例以便取消
+    _extractor_instance = extractor
 
     cached_syllabus_filename = "%s-syllabus-parsed.json" % class_name
     if args.cache_syllabus and os.path.isfile(cached_syllabus_filename):
@@ -137,6 +149,9 @@ def download_on_demand_class(session, args, class_name):
         return error_occurred, False
 
     downloader = get_downloader(session, class_name, args)
+    # 保存文件下载器实例以便取消
+    _file_downloader_instance = downloader
+
     downloader_wrapper = (
         ParallelDownloader(downloader, args.jobs)
         if args.jobs > 1
@@ -158,6 +173,9 @@ def download_on_demand_class(session, args, class_name):
         disable_url_skipping=args.disable_url_skipping,
     )
 
+    # 保存全局实例以便取消
+    _course_downloader_instance = course_downloader
+
     completed = course_downloader.download_modules(modules)
 
     # Print skipped URLs if any
@@ -170,6 +188,35 @@ def download_on_demand_class(session, args, class_name):
         print_failed_urls(course_downloader.failed_urls)
 
     return error_occurred, completed
+
+
+def cancel_download():
+    """取消当前下载"""
+    global _course_downloader_instance
+    global _file_downloader_instance
+    global _extractor_instance
+
+    logging.info("Download cancellation requested")
+
+    # 取消extractor
+    if _extractor_instance:
+        # 检查是否有set_cancel_flag方法
+        if hasattr(_extractor_instance, "set_cancel_flag"):
+            _extractor_instance.set_cancel_flag(True)
+            logging.info("Extractor cancellation requested")
+
+    # 取消课程下载器
+    if _course_downloader_instance:
+        _course_downloader_instance.cancel()
+
+    # 取消文件下载器
+    if _file_downloader_instance:
+        # 检查是否有set_cancel_flag方法
+        if hasattr(_file_downloader_instance, "set_cancel_flag"):
+            _file_downloader_instance.set_cancel_flag(True)
+            logging.info("File downloader cancellation requested")
+
+    return True
 
 
 def print_skipped_urls(skipped_urls):
@@ -208,27 +255,35 @@ def download_class(session, args, class_name):
     return download_on_demand_class(session, args, class_name)
 
 
-def main_f(cmd):
+def main():
     """
     Main entry point for execution as a program (instead of as a module).
     """
-    # cmd is the usual command line instructions
-    # ==================
-    args = parse_args(cmd)
-    # ===================
-    logging.info(">> COURSERA FULL COURSE DOWNLOADER\n")
+
+    args = parse_args()
+    logging.info("coursera_dl version %s", __version__)
     completed_classes = []
     classes_with_errors = []
 
     mkdir_p(PATH_CACHE, 0o700)
     if args.clear_cache:
         shutil.rmtree(PATH_CACHE)
+
+    session = get_session()
+    if args.cookies_cauth:
+        session.cookies.set("CAUTH", args.cookies_cauth)
+    elif args.browser_cookie:
+        cauth = cauth_by_cookie()
+        session.cookies.set("CAUTH", cauth)
+    else:
+        cauth = cauth_by_login(args.username, args.password, headless=args.headless)
+        session.cookies.set("CAUTH", cauth)
+        # login(session, args.username, args.password)
+
     if args.list_courses:
         logging.info("Listing enrolled courses")
-        list_courses(args)
+        list_courses(session, args)
         return
-
-    session = create_session(args)
 
     if args.specialization:
         args.class_names = expand_specializations(session, args.class_names)
@@ -247,26 +302,18 @@ def main_f(cmd):
             if error_occurred:
                 classes_with_errors.append(class_name)
         except requests.exceptions.HTTPError as e:
-            # logging.error('HTTPError %s', e)
-            # if is_debug_run():
-            #     logging.exception('HTTPError %s', e)
-
-            raise  # raise error
-
+            logging.error("HTTPError %s", e)
+            if is_debug_run():
+                logging.exception("HTTPError %s", e)
         except requests.exceptions.SSLError as e:
-            # logging.error('SSLError %s', e)
-            # print_ssl_error_message(e)
+            logging.error("SSLError %s", e)
+            print_ssl_error_message(e)
             if is_debug_run():
                 raise
-
-            raise
-
         except ClassNotFound as e:
             logging.error("Could not find class: %s", e)
-            raise
         except AuthenticationFailed as e:
             logging.error("Could not authenticate: %s", e)
-            raise
 
         if class_index + 1 != len(args.class_names):
             logging.info(
@@ -292,3 +339,7 @@ def main_f(cmd):
             logging.info(
                 "%s (https://www.coursera.org/learn/%s)", class_name, class_name
             )
+
+
+if __name__ == "__main__":
+    main()
