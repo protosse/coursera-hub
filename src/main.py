@@ -22,20 +22,20 @@ class CourseraHub:
         # 配置文件路径
         self.config_path = Path.home() / ".coursera_hub_config.json"
 
-        self.langs = list(ALL_Language.keys())
-        self.browsers = list(ALL_BROWERS.keys())
+        self.langs = list(Language)
+        self.browsers = list(Browser)
 
         # 全局变量
-        self.auth_method = "cauth"
+        self.auth_method = AuthMethod.CAUTH
         self.cauth = ""
         self.username = ""
         self.password = ""
         self.course_name = ""
         self.download_path = str(Path.home())
-        self.subtitle_language1 = self.langs[0]
-        self.subtitle_language2 = self.langs[1]
+        self.subtitle_language1 = Language.ENGLISH
+        self.subtitle_language2 = Language.CHINESE
         self.is_special = False
-        self.browser = "edge"
+        self.browser = Browser.EDGE
 
         # 创建输出日志控件的ref
         self.output_list_view = ft.Ref[ft.ListView]()
@@ -68,21 +68,21 @@ class CourseraHub:
                 content=ft.Column(
                     controls=[
                         ft.RadioGroup(
-                            value=self.auth_method,
+                            value=self.auth_method.value,
                             on_change=self.auth_method_changed,
                             content=ft.Row(
                                 controls=[
                                     ft.Radio(
                                         label="CAUTH",
-                                        value="cauth",
+                                        value=AuthMethod.CAUTH.value,
                                     ),
                                     ft.Radio(
                                         label="浏览器Cookie",
-                                        value="browser",
+                                        value=AuthMethod.BROWSER.value,
                                     ),
                                     ft.Radio(
                                         label="用户名密码",
-                                        value="credentials",
+                                        value=AuthMethod.CREDENTIALS.value,
                                     ),
                                 ]
                             ),
@@ -127,17 +127,19 @@ class CourseraHub:
                 controls=[
                     ft.DropdownM2(
                         label="字幕1",
-                        value=self.subtitle_language1,
+                        value=self.subtitle_language1.value,
                         options=[
-                            ft.dropdownm2.Option(key=v, text=v) for v in self.langs
+                            ft.dropdownm2.Option(key=v.value, text=v.value)
+                            for v in self.langs
                         ],
                         on_change=self.subtitle_language1_changed,
                     ),
                     ft.DropdownM2(
                         label="字幕2",
-                        value=self.subtitle_language2,
+                        value=self.subtitle_language2.value,
                         options=[
-                            ft.dropdownm2.Option(key=v, text=v) for v in self.langs
+                            ft.dropdownm2.Option(key=v.value, text=v.value)
+                            for v in self.langs
                         ],
                         on_change=self.subtitle_language2_changed,
                     ),
@@ -184,14 +186,14 @@ class CourseraHub:
         self.update_auth_details()
 
     def auth_method_changed(self, e):
-        self.auth_method = e.control.value
+        self.auth_method = AuthMethod(e.control.value)
         self.update_auth_details()
         self.save_config()
 
     def update_auth_details(self):
         self.auth_details.controls.clear()
 
-        if self.auth_method == "cauth":
+        if self.auth_method == AuthMethod.CAUTH:
             self.auth_details.controls.append(
                 ft.TextField(
                     label="CAUTH值",
@@ -200,7 +202,7 @@ class CourseraHub:
                     on_change=self.cauth_changed,
                 )
             )
-        elif self.auth_method == "credentials":
+        elif self.auth_method == AuthMethod.CREDENTIALS:
             self.auth_details.controls.append(
                 ft.TextField(
                     label="用户名/邮箱",
@@ -214,18 +216,19 @@ class CourseraHub:
                     label="密码",
                     hint_text="输入密码",
                     value=self.password,
-                    password=True,
                     on_change=self.password_changed,
                 )
             )
-        elif self.auth_method == "browser":
+        elif self.auth_method == AuthMethod.BROWSER:
             self.auth_details.controls.append(
                 ft.DropdownM2(
                     label="浏览器",
-                    value=self.browser,
+                    value=self.browser.value,
                     options=[
-                        ft.dropdownm2.Option(key=v, text=v) for v in self.browsers
+                        ft.dropdownm2.Option(key=v.value, text=v.value)
+                        for v in self.browsers
                     ],
+                    on_change=self.browser_change,
                 )
             )
 
@@ -264,37 +267,43 @@ class CourseraHub:
         self.save_config()
 
     def browser_change(self, e):
-        self.browser = e.control.value
+        self.browser = Browser(e.control.value)
         self.save_config()
 
     def subtitle_language1_changed(self, e):
-        self.subtitle_language1 = e.control.value
+        self.subtitle_language1 = Language(e.control.value)
         self.save_config()
 
     def subtitle_language2_changed(self, e):
-        self.subtitle_language2 = e.control.value
+        self.subtitle_language2 = Language(e.control.value)
         self.save_config()
 
     def list_courses(self, e):
         self.append_output("正在列出课程...")
 
         # 先进行认证
-        if self.auth_method == "cauth" and self.cauth:
+        if self.auth_method == AuthMethod.CAUTH and self.cauth:
             success, message = self.coursera_helper.authenticate(
-                "cauth", cauth=self.cauth
+                AuthMethod.CAUTH, cauth=self.cauth
             )
             self.append_output(message)
             if not success:
                 return
-        elif self.auth_method == "credentials" and self.username and self.password:
+        elif (
+            self.auth_method == AuthMethod.CREDENTIALS
+            and self.username
+            and self.password
+        ):
             success, message = self.coursera_helper.authenticate(
-                "credentials", username=self.username, password=self.password
+                AuthMethod.CREDENTIALS,
+                username=self.username,
+                password=self.password,
             )
             self.append_output(message)
             if not success:
                 return
-        elif self.auth_method == "browser":
-            success, message = self.coursera_helper.authenticate("browser")
+        elif self.auth_method == AuthMethod.BROWSER:
+            success, message = self.coursera_helper.authenticate(AuthMethod.BROWSER)
             self.append_output(message)
             if not success:
                 return
@@ -322,23 +331,29 @@ class CourseraHub:
 
         def run_download():
             # 先进行认证
-            if self.auth_method == "cauth" and self.cauth:
+            if self.auth_method == AuthMethod.CAUTH and self.cauth:
                 success, message = self.coursera_helper.authenticate(
-                    "cauth", cauth=self.cauth
+                    AuthMethod.CAUTH, cauth=self.cauth
                 )
                 # 将消息放入队列
                 self.message_queue.put(message)
                 if not success:
                     return
-            elif self.auth_method == "credentials" and self.username and self.password:
+            elif (
+                self.auth_method == AuthMethod.CREDENTIALS
+                and self.username
+                and self.password
+            ):
                 success, message = self.coursera_helper.authenticate(
-                    "credentials", username=self.username, password=self.password
+                    AuthMethod.CREDENTIALS,
+                    username=self.username,
+                    password=self.password,
                 )
                 self.message_queue.put(message)
                 if not success:
                     return
-            elif self.auth_method == "browser":
-                success, message = self.coursera_helper.authenticate("browser")
+            elif self.auth_method == AuthMethod.BROWSER:
+                success, message = self.coursera_helper.authenticate(AuthMethod.BROWSER)
                 self.message_queue.put(message)
                 if not success:
                     return
@@ -348,8 +363,7 @@ class CourseraHub:
 
             # 调用coursera-helper的download_course方法
             langs = [
-                ALL_Language[v]
-                for v in [self.subtitle_language1, self.subtitle_language2]
+                v.code for v in set([self.subtitle_language1, self.subtitle_language2])
             ]
             download_options = {
                 "subtitle_language": ",".join(langs),
@@ -469,36 +483,38 @@ class CourseraHub:
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                    self.auth_method = config.get("auth_method", "cauth")
+                    self.auth_method = AuthMethod(
+                        config.get("auth_method", AuthMethod.CAUTH.value)
+                    )
                     self.cauth = config.get("cauth", "")
                     self.username = config.get("username", "")
                     self.password = config.get("password", "")
                     self.course_name = config.get("course_name", "")
                     self.download_path = config.get("download_path", str(Path.home()))
-                    self.subtitle_language1 = config.get(
-                        "subtitle_language1", self.langs[0]
+                    self.subtitle_language1 = Language(
+                        config.get("subtitle_language1", self.langs[0].value)
                     )
-                    self.subtitle_language2 = config.get(
-                        "subtitle_language2", self.langs[1]
+                    self.subtitle_language2 = Language(
+                        config.get("subtitle_language2", self.langs[1].value)
                     )
                     self.is_special = config.get("is_special", False)
-                    self.browser = config.get("browser", "edge")
+                    self.browser = Browser(config.get("browser", Browser.EDGE.value))
             except Exception as e:
                 print(f"加载配置失败: {e}")
 
     def save_config(self):
         """保存配置"""
         config = {
-            "auth_method": self.auth_method,
+            "auth_method": self.auth_method.value,
             "cauth": self.cauth,
             "username": self.username,
             "password": self.password,
             "course_name": self.course_name,
             "download_path": self.download_path,
-            "subtitle_language1": self.subtitle_language1,
-            "subtitle_language2": self.subtitle_language2,
+            "subtitle_language1": self.subtitle_language1.value,
+            "subtitle_language2": self.subtitle_language2.value,
             "is_special": self.is_special,
-            "browser": self.browser,
+            "browser": self.browser.value,
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:

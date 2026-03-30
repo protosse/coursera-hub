@@ -10,7 +10,7 @@ authors = [
     { name = "" },
 ]
 dependencies = [
-    "flet>=0.22.0",
+    "flet>=0.82.2",
     "requests>=2.31.0",
     "beautifulsoup4>=4.12.2",
     "lxml>=4.9.3",
@@ -19,7 +19,7 @@ dependencies = [
     "attrs>=25.3.0",
     "configargparse>=1.7.5",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.13"
 
 [tool.setuptools.packages.find]
 where = ["."]

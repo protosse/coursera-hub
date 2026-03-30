@@ -1,6 +1,7 @@
 import logging
 import os
 
+from constants import AuthMethod
 from coursera_helper.cauth import cauth_by_cookie, cauth_by_login
 from coursera_helper.coursera_dl import download_class, get_session
 
@@ -10,26 +11,26 @@ class CourseraHelperWrapper:
         self.session = get_session()
         logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    def authenticate(self, auth_method, **kwargs):
+    def authenticate(self, auth_method: AuthMethod, **kwargs):
         """
         认证方法
         auth_method: 'cauth', 'browser', 'credentials'
         kwargs: 根据auth_method提供相应的参数
         """
         try:
-            if auth_method == "cauth":
+            if auth_method == AuthMethod.CAUTH:
                 cauth = kwargs.get("cauth")
                 if cauth:
                     self.session.cookies.set("CAUTH", cauth)
                     return True, "CAUTH认证成功"
-            elif auth_method == "credentials":
+            elif auth_method == AuthMethod.CREDENTIALS:
                 username = kwargs.get("username")
                 password = kwargs.get("password")
                 if username and password:
                     cauth = cauth_by_login(username, password, headless=True)
                     self.session.cookies.set("CAUTH", cauth)
                     return True, "用户名密码认证成功"
-            elif auth_method == "browser":
+            elif auth_method == AuthMethod.BROWSER:
                 cauth = cauth_by_cookie()
                 self.session.cookies.set("CAUTH", cauth)
                 return True, "浏览器Cookie认证成功"
