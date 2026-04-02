@@ -37,3 +37,13 @@ class Browser(Enum):
     FIREFOX = "firefox"
     LIBREWOLF = "librewolf"
     SAFARI = "safari"
+
+
+class DownloadTool(Enum):
+    """下载工具枚举"""
+
+    default = "default"
+    curl = "curl"
+    aria2 = "aria2c"
+    axel = "axel"
+    wget = "wget"

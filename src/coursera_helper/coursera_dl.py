@@ -255,12 +255,13 @@ def download_class(session, args, class_name):
     return download_on_demand_class(session, args, class_name)
 
 
-def main():
+def main(session=None, args=None):
     """
     Main entry point for execution as a program (instead of as a module).
     """
 
-    args = parse_args()
+    if args is None:
+        args = parse_args()
     logging.info("coursera_dl version %s", __version__)
     completed_classes = []
     classes_with_errors = []
@@ -269,16 +270,16 @@ def main():
     if args.clear_cache:
         shutil.rmtree(PATH_CACHE)
 
-    session = get_session()
-    if args.cookies_cauth:
+    if session is None:
+        session = get_session()
+    if args.cookies_cauth and args.cookies_cauth != "dummy_cauth":
         session.cookies.set("CAUTH", args.cookies_cauth)
     elif args.browser_cookie:
         cauth = cauth_by_cookie()
         session.cookies.set("CAUTH", cauth)
-    else:
+    elif args.username and args.password:
         cauth = cauth_by_login(args.username, args.password, headless=args.headless)
         session.cookies.set("CAUTH", cauth)
-        # login(session, args.username, args.password)
 
     if args.list_courses:
         logging.info("Listing enrolled courses")
@@ -314,6 +315,8 @@ def main():
             logging.error("Could not find class: %s", e)
         except AuthenticationFailed as e:
             logging.error("Could not authenticate: %s", e)
+        except Exception as e:
+            logging.error("error: %s", e)
 
         if class_index + 1 != len(args.class_names):
             logging.info(

@@ -87,6 +87,8 @@ class ExternalDownloader(Downloader):
         if not self.bin:
             raise RuntimeError("No bin specified")
 
+        self._check_bin()
+
     def _prepare_cookies(self, command, url):
         """
         Extract cookies from the requests session and add them to the command
@@ -121,6 +123,15 @@ class ExternalDownloader(Downloader):
         """
         raise NotImplementedError("Subclasses should implement this")
 
+    def _check_bin(self):
+        """
+        Make sure the downloader is installed
+        """
+        try:
+            subprocess.run([self.bin, "--version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            raise RuntimeError(f"Downloader '{self.bin}' not found or failed: {e}")
+
     def _start_download(self, url, filename, resume):
         command = self._create_command(url, filename)
         command.extend(self.downloader_arguments)
@@ -130,10 +141,34 @@ class ExternalDownloader(Downloader):
 
         logging.debug("Executing %s: %s", self.bin, command)
         try:
-            subprocess.call(command)
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+            )
+            # 实时读取输出
+            for line in iter(process.stdout.readline, ""):
+                if line:
+                    # 移除ANSI转义序列（终端颜色控制代码）
+                    line = self._strip_ansi(line)
+                    # 移除换行符，保留\r用于进度条更新
+                    line = line.rstrip("\n")
+                    print(line)
+            process.stdout.close()
+            process.wait()
         except OSError as e:
             msg = "{0}. Are you sure that '{1}' is the right bin?".format(e, self.bin)
             raise OSError(msg)
+
+    @staticmethod
+    def _strip_ansi(text):
+        """移除ANSI转义序列"""
+        import re
+
+        ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        return ansi_escape.sub("", text)
 
 
 class WgetDownloader(ExternalDownloader):

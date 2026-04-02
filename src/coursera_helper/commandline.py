@@ -3,14 +3,15 @@ This module contains code that is related to command-line argument
 handling. The primary candidate is argument parser.
 """
 
+import logging
 import os
 import sys
-import logging
+
 import configargparse as argparse
 
 from coursera_helper import __version__
 
-from .credentials import get_credentials, CredentialsError, keyring
+from .credentials import CredentialsError, get_credentials, keyring
 from .utils import decode_input
 
 LOCAL_CONF_FILE_NAME = 'coursera-dl.conf'

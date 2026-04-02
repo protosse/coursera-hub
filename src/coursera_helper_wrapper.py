@@ -1,9 +1,14 @@
 import logging
 import os
+import sys
+import threading
 
 from constants import AuthMethod
 from coursera_helper.cauth import cauth_by_cookie, cauth_by_login
-from coursera_helper.coursera_dl import download_class, get_session
+from coursera_helper.commandline import parse_args
+from coursera_helper.coursera_dl import cancel_download, get_session
+from coursera_helper.coursera_dl import main as m
+from coursera_helper.extractors import CourseraExtractor
 
 
 class CourseraHelperWrapper:
@@ -40,9 +45,6 @@ class CourseraHelperWrapper:
 
     def list_courses(self):
         try:
-            # 直接使用CourseraExtractor来列出课程
-            from coursera_helper.extractors import CourseraExtractor
-
             extractor = CourseraExtractor(self.session)
             courses = extractor.list_courses()
             return courses
@@ -61,38 +63,24 @@ class CourseraHelperWrapper:
         try:
             # 使用parse_args获取完整的args对象
             # 创建一个简单的命令行参数列表
-            import sys
-            import threading
 
-            from coursera_helper.commandline import parse_args
-
-            original_argv = sys.argv
             sys.argv = ["coursera_dl", "--cauth", "dummy_cauth", "dummy_course"]
-
-            try:
-                args = parse_args()
-            finally:
-                sys.argv = original_argv
+            args = parse_args()
 
             # 修改需要的属性
-            args.subtitle_language = options.get("subtitle_language", "en")
-            args.video_resolution = options.get("video_resolution", "720p")
-            args.download_quizzes = options.get("download_quizzes", False)
-            args.download_notebooks = options.get("download_notebooks", False)
+            args.class_names = [course_name]
             args.path = download_path
+            for option, value in options.items():
+                setattr(args, option, value)
 
             # 确保下载路径存在
-            os.makedirs(download_path, exist_ok=True)
+            if len(download_path) > 0:
+                os.makedirs(download_path, exist_ok=True)
 
             yield f"开始下载课程: {course_name}"
+            yield f"是否是专业课程: {args.specialization}"
             yield f"下载路径: {download_path}"
             yield f"字幕语言: {args.subtitle_language}"
-            yield f"视频分辨率: {args.video_resolution}"
-            yield f"下载测验: {args.download_quizzes}"
-            yield f"下载笔记本: {args.download_notebooks}"
-
-            # 从coursera_dl模块导入取消函数
-            from coursera_helper.coursera_dl import cancel_download
 
             # 启动一个监控线程，检查取消请求
             def monitor_cancel():
@@ -107,15 +95,8 @@ class CourseraHelperWrapper:
             cancel_thread = threading.Thread(target=monitor_cancel, daemon=True)
             cancel_thread.start()
 
-            # 执行下载
-            error_occurred, completed = download_class(self.session, args, course_name)
-
-            if completed:
-                yield f"课程下载完成: {course_name}"
-            else:
-                yield f"课程下载失败或未完成: {course_name}"
-
-            return completed
+            m(self.session, args)
+            return True
 
         except Exception as e:
             # 检查是否取消

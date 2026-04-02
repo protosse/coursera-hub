@@ -24,6 +24,7 @@ class CourseraHub:
 
         self.langs = list(Language)
         self.browsers = list(Browser)
+        self.download_tools = list(DownloadTool)
 
         # 全局变量
         self.auth_method = AuthMethod.CAUTH
@@ -36,6 +37,7 @@ class CourseraHub:
         self.subtitle_language2 = Language.CHINESE
         self.is_special = False
         self.browser = Browser.EDGE
+        self.download_tool = DownloadTool.default
 
         # 创建输出日志控件的ref
         self.output_list_view = ft.Ref[ft.ListView]()
@@ -49,6 +51,7 @@ class CourseraHub:
 
         # 下载线程和取消标志
         self.download_thread = None
+        self.list_thread = None
         self.cancel_download = False
 
         # 加载配置
@@ -99,14 +102,24 @@ class CourseraHub:
                 controls=[
                     ft.TextField(
                         label="课程名称",
-                        hint_text="输入课程名称，留空则列出所有课程",
+                        hint_text="请输入课程名称",
                         value=self.course_name,
                         on_change=self.course_name_changed,
+                        expand=True,
                     ),
                     ft.Checkbox(
                         label="专项课程",
                         value=self.is_special,
                         on_change=self.is_special_changed,
+                    ),
+                    ft.DropdownM2(
+                        label="下载工具",
+                        value=self.download_tool.value,
+                        options=[
+                            ft.dropdownm2.Option(key=v.value, text=v.value)
+                            for v in self.download_tools
+                        ],
+                        on_change=self.download_tool_changed,
                     ),
                 ]
             ),
@@ -152,6 +165,12 @@ class CourseraHub:
                     ft.Button(
                         "下载课程",
                         on_click=self.download_course,
+                        bgcolor=ft.Colors.BLUE,
+                        color=ft.Colors.WHITE,
+                    ),
+                    ft.Button(
+                        "恢复下载",
+                        on_click=self.resume_download,
                         bgcolor=ft.Colors.BLUE,
                         color=ft.Colors.WHITE,
                     ),
@@ -266,6 +285,10 @@ class CourseraHub:
         self.is_special = e.control.value
         self.save_config()
 
+    def download_tool_changed(self, e):
+        self.download_tool = DownloadTool(e.control.value)
+        self.save_config()
+
     def browser_change(self, e):
         self.browser = Browser(e.control.value)
         self.save_config()
@@ -278,50 +301,64 @@ class CourseraHub:
         self.subtitle_language2 = Language(e.control.value)
         self.save_config()
 
-    def list_courses(self, e):
-        self.append_output("正在列出课程...")
+    async def list_courses(self, e):
+        def run_list_courses():
+            self.message_queue.put("正在列出课程...")
 
-        # 先进行认证
-        if self.auth_method == AuthMethod.CAUTH and self.cauth:
-            success, message = self.coursera_helper.authenticate(
-                AuthMethod.CAUTH, cauth=self.cauth
-            )
-            self.append_output(message)
-            if not success:
+            # 先进行认证
+            if self.auth_method == AuthMethod.CAUTH and self.cauth:
+                success, message = self.coursera_helper.authenticate(
+                    AuthMethod.CAUTH, cauth=self.cauth
+                )
+                self.message_queue.put(message)
+                if not success:
+                    return
+            elif (
+                self.auth_method == AuthMethod.CREDENTIALS
+                and self.username
+                and self.password
+            ):
+                success, message = self.coursera_helper.authenticate(
+                    AuthMethod.CREDENTIALS,
+                    username=self.username,
+                    password=self.password,
+                )
+                self.message_queue.put(message)
+                if not success:
+                    return
+            elif self.auth_method == AuthMethod.BROWSER:
+                success, message = self.coursera_helper.authenticate(AuthMethod.BROWSER)
+                self.message_queue.put(message)
+                if not success:
+                    return
+            else:
+                self.message_queue.put("错误：请输入完整的认证信息")
                 return
-        elif (
-            self.auth_method == AuthMethod.CREDENTIALS
-            and self.username
-            and self.password
-        ):
-            success, message = self.coursera_helper.authenticate(
-                AuthMethod.CREDENTIALS,
-                username=self.username,
-                password=self.password,
-            )
-            self.append_output(message)
-            if not success:
-                return
-        elif self.auth_method == AuthMethod.BROWSER:
-            success, message = self.coursera_helper.authenticate(AuthMethod.BROWSER)
-            self.append_output(message)
-            if not success:
-                return
-        else:
-            self.append_output("错误：请输入完整的认证信息")
-            return
 
-        # 调用coursera-helper的list_courses方法
-        courses = self.coursera_helper.list_courses()
+            # 调用coursera-helper的list_courses方法
+            courses = self.coursera_helper.list_courses()
 
-        if isinstance(courses, list):
-            self.append_output("列出课程成功！")
-            for course in courses:
-                self.append_output(course)
-        else:
-            self.append_output(f"列出课程失败: {courses}")
+            if isinstance(courses, list):
+                self.message_queue.put("列出课程成功！")
+                for course in courses:
+                    self.message_queue.put(course)
+            else:
+                self.message_queue.put(f"列出课程失败: {courses}")
+
+        import threading
+
+        self.list_thread = threading.Thread(target=run_list_courses, daemon=True)
+        self.list_thread.start()
+
+        await self.process_message_queue()
 
     async def download_course(self, e):
+        await self.download(resume=False)
+
+    async def resume_download(self, e):
+        await self.download(resume=True)
+
+    async def download(self, resume: bool = False):
         if not self.course_name:
             self.append_output("错误：请输入课程名称")
             return
@@ -370,7 +407,18 @@ class CourseraHub:
                 "video_resolution": "720p",
                 "download_quizzes": True,
                 "download_notebooks": True,
+                "specialization": self.is_special,
             }
+
+            match self.download_tool:
+                case DownloadTool.default:
+                    pass
+                case _:
+                    download_options[self.download_tool.name] = self.download_tool.value
+
+            if resume:
+                download_options["resume"] = True
+                download_options["cache_syllabus"] = True
 
             # 使用生成器实时显示下载进度
             for progress_message in self.coursera_helper.download_course(
@@ -411,23 +459,53 @@ class CourseraHub:
 
     async def process_message_queue(self):
         """处理消息队列中的消息"""
-        try:
-            # 尝试从队列中获取消息（非阻塞）
-            while not self.message_queue.empty():
-                message = self.message_queue.get(block=False)
-                self.append_output(message)
-                self.message_queue.task_done()
-        except:
-            pass
+        import asyncio
 
-        # 设置定时器，继续处理队列
-        self.page.run_task(self.process_message_queue)
+        while True:
+            try:
+                while not self.message_queue.empty():
+                    message = self.message_queue.get(block=False)
+                    self.append_output(message)
+                    self.message_queue.task_done()
+            except:
+                pass
+
+            has_active_thread = (
+                self.download_thread and self.download_thread.is_alive()
+            ) or (self.list_thread and self.list_thread.is_alive())
+
+            if has_active_thread or not self.message_queue.empty():
+                await asyncio.sleep(0.1)
+            else:
+                break
 
     def append_output(self, text):
         # 使用ref直接获取ListView控件
         if self.output_list_view.current:
-            # 添加新的日志条目
-            self.output_list_view.current.controls.append(ft.Text(text))
+            # 检查是否是进度条信息（以\r开头）
+            if text.startswith("\r") or text.startswith("#"):
+                # 移除\r并更新最后一个文本控件
+                text = text[1:]
+                if self.output_list_view.current.controls:
+                    # 更新最后一个控件
+                    last_control = self.output_list_view.current.controls[-1]
+                    if isinstance(last_control, ft.Text):
+                        last_control.value = text
+                    else:
+                        # 如果最后一个不是Text控件，添加新的
+                        self.output_list_view.current.controls.append(
+                            ft.Text(text, selectable=True)
+                        )
+                else:
+                    # 如果没有控件，添加新的
+                    self.output_list_view.current.controls.append(
+                        ft.Text(text, selectable=True)
+                    )
+            else:
+                # 添加新的日志条目
+                self.output_list_view.current.controls.append(
+                    ft.Text(text, selectable=True)
+                )
             # 更新UI
             self.output_list_view.current.update()
             self.page.update()
@@ -499,6 +577,9 @@ class CourseraHub:
                     )
                     self.is_special = config.get("is_special", False)
                     self.browser = Browser(config.get("browser", Browser.EDGE.value))
+                    self.download_tool = DownloadTool(
+                        config.get("download_tool", DownloadTool.default.value)
+                    )
             except Exception as e:
                 print(f"加载配置失败: {e}")
 
@@ -515,6 +596,7 @@ class CourseraHub:
             "subtitle_language2": self.subtitle_language2.value,
             "is_special": self.is_special,
             "browser": self.browser.value,
+            "download_tool": self.download_tool.value,
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
